@@ -769,8 +769,7 @@ public class GridManager : MonoBehaviour
                             // Inicia a animação de remoção
                             piece.StartBondAnimation();
 
-                            // Destroi o GameObject
-                            Destroy(piece.gameObject);
+                            // ElementPiece.FadeOut() will now handle Destroy(piece.gameObject)
                         }
 
                         // Faz as peças caírem após a remoção

@@ -56,15 +56,55 @@ public class ElementPiece : MonoBehaviour
     // Método para iniciar a animação de remoção quando formar uma ligação
     public void StartBondAnimation()
     {
-        // Aqui você pode adicionar uma animação visual para indicar que a peça está formando uma ligação
-        // Por exemplo:
-        // StartCoroutine(FadeOut());
+        StartCoroutine(FadeOut());
     }
 
     private IEnumerator FadeOut()
     {
-        // Implementar animação de fade out
-        yield return null;
+        float fadeDuration = 0.5f;
+        Renderer pieceRenderer = GetComponent<Renderer>();
+
+        if (pieceRenderer == null)
+        {
+            Debug.LogError("Renderer not found on ElementPiece. Cannot perform fade animation.");
+            Destroy(gameObject); // Destroy immediately if no renderer
+            yield break;
+        }
+
+        // Check if material supports transparency (very basic check)
+        // A more robust check would involve knowing the specific shader being used.
+        // Standard shader needs to be set to "Fade" or "Transparent" mode.
+        if (pieceRenderer.material.shader.name.Contains("Standard") && pieceRenderer.material.GetFloat("_Mode") > 1) // 2 is Fade, 3 is Transparent
+        {
+            // Shader is likely Standard and set to Fade or Transparent
+        }
+        else if (pieceRenderer.material.HasProperty("_Color"))
+        {
+             // This is a broad check. Many shaders have a _Color property.
+             // If this is not a transparent shader, alpha changes won't be visible.
+             Debug.LogWarning("ElementPiece material might not support transparency for fade out. Shader: " + pieceRenderer.material.shader.name + ". Ensure material uses a transparent shader (e.g., Standard with Rendering Mode set to Fade/Transparent).");
+        }
+        else
+        {
+            Debug.LogWarning("ElementPiece material does not seem to have a standard _Color property for transparency. Fade out may not be visible. Shader: " + pieceRenderer.material.shader.name);
+        }
+
+
+        Color originalColor = pieceRenderer.material.color;
+        float elapsedTime = 0f;
+
+        while (elapsedTime < fadeDuration)
+        {
+            elapsedTime += Time.deltaTime;
+            float newAlpha = Mathf.Lerp(originalColor.a, 0f, elapsedTime / fadeDuration);
+            pieceRenderer.material.color = new Color(originalColor.r, originalColor.g, originalColor.b, newAlpha);
+            yield return null;
+        }
+
+        // Ensure alpha is fully 0
+        pieceRenderer.material.color = new Color(originalColor.r, originalColor.g, originalColor.b, 0f);
+        
+        Destroy(gameObject);
     }
 
     // Você pode adicionar outros métodos aqui que as peças possam precisar,
@@ -82,11 +122,9 @@ public class ElementPiece : MonoBehaviour
         // Lógica de atualização específica da peça, se houver.
     }
 
-    // TODO: Adicionar métodos auxiliares para obter informações do elemento com base no índice,
-    // ou ter uma estrutura de dados central (possivelmente no GridManager ou outro script)
-    // que mapeie o índice do elemento para os seus dados (número, símbolo, nome, cor).
-    // private int GetAtomicNumber(int typeIndex) { /* Implementar */ return 0; }
-    // private string GetSymbol(int typeIndex) { /* Implementar */ return "N/A"; }
-    // private string GetName(int typeIndex) { /* Implementar */ return "Unknown"; }
-    // private Color GetElementColor(int typeIndex) { /* Implementar */ return Color.gray; }
+    // The static 'elementData' dictionary above serves as a central mapping for element properties.
+    // Currently, this data is used internally by ElementPiece instances.
+    // If other scripts require direct static access to this mapping in the future
+    // (e.g., to get the symbol for an element type without an instance),
+    // public static getter methods can be added here (e.g., public static string GetElementSymbol(int elementType)).
 }
