@@ -514,11 +514,14 @@ public class GridManager : MonoBehaviour
     // Método para fazer as peças caírem após a remoção
     private void MakePiecesFall()
     {
+        Debug.Log("MakePiecesFall() called.");
         bool piecesFell = false;
+        HashSet<Vector2Int> locationsToCheck = new HashSet<Vector2Int>();
         
         // Para cada coluna
         for (int col = 0; col < width; col++)
         {
+            Debug.Log($"Checking column {col} for falling pieces.");
             // Encontra a primeira posição vazia de BAIXO para CIMA
             int firstEmptyRow = -1;
             for (int row = height - 1; row >= 0; row--)
@@ -533,40 +536,67 @@ public class GridManager : MonoBehaviour
             // Se encontrou um espaço vazio
             if (firstEmptyRow != -1)
             {
+                Debug.Log($"Found empty row at {firstEmptyRow} in column {col}.");
                 // Procura a primeira peça acima do espaço vazio
                 for (int row = firstEmptyRow - 1; row >= 0; row--)
                 {
                     if (grid[col, row] != null)
                     {
-                        // Move a peça para o espaço vazio
-                        grid[col, firstEmptyRow] = grid[col, row];
+                        Debug.Log($"Found piece at [{col}, {row}] to move to [{col}, {firstEmptyRow}].");
+                        ElementPiece pieceScript = grid[col, row].GetComponent<ElementPiece>();
+                        if (pieceScript != null)
+                        {
+                            Debug.Log($"Moving piece of type: {pieceScript.elementType}");
+                        }
+                        
+                        GameObject pieceToMove = grid[col, row];
+                        grid[col, firstEmptyRow] = pieceToMove;
                         grid[col, row] = null;
                         
-                        // Atualiza a posição visual da peça
                         Vector3 newPosition = CalculateGridPosition(col, firstEmptyRow);
-                        grid[col, firstEmptyRow].transform.position = newPosition;
+                        pieceToMove.transform.position = newPosition;
+                        Debug.Log($"Piece moved to grid[{col}, {firstEmptyRow}] and position updated.");
                         
                         piecesFell = true;
-                        
-                        // Atualiza o primeiro espaço vazio
+                        locationsToCheck.Add(new Vector2Int(col, firstEmptyRow)); // Adiciona a nova posição da peça
+
+                        // Adiciona posições adjacentes ortogonalmente à nova posição da peça
+                        AddAdjacentLocations(locationsToCheck, col, firstEmptyRow);
+
                         firstEmptyRow--;
                     }
                 }
             }
         }
         
-        // Se alguma peça caiu, verifica novamente por ligações
         if (piecesFell)
         {
-            // Verifica todas as posições da grade por ligações
-            for (int col = 0; col < width; col++)
+            Debug.Log($"Pieces fell, re-triggering bond checks for {locationsToCheck.Count} specific locations.");
+            foreach (var loc in locationsToCheck)
             {
-                for (int row = 0; row < height; row++)
+                if (grid[loc.x, loc.y] != null) // Verifica se ainda existe uma peça no local (pode ter sido removida por outra ligação)
                 {
-                    if (grid[col, row] != null)
-                    {
-                        CheckForChemicalBonds(col, row);
-                    }
+                    CheckForChemicalBonds(loc.x, loc.y);
+                }
+            }
+        }
+    }
+
+    private void AddAdjacentLocations(HashSet<Vector2Int> locations, int col, int row)
+    {
+        int[] dCol = { -1, 1, 0, 0 };
+        int[] dRow = { 0, 0, -1, 1 };
+
+        for (int i = 0; i < 4; i++)
+        {
+            int adjacentCol = col + dCol[i];
+            int adjacentRow = row + dRow[i];
+
+            if (adjacentCol >= 0 && adjacentCol < width && adjacentRow >= 0 && adjacentRow < height)
+            {
+                if (grid[adjacentCol, adjacentRow] != null) // Só adiciona se houver uma peça lá
+                {
+                    locations.Add(new Vector2Int(adjacentCol, adjacentRow));
                 }
             }
         }
@@ -639,10 +669,15 @@ public class GridManager : MonoBehaviour
     }
 
     // Verifica ligações químicas
+    private static long bondCheckRecursionCounter = 0; // Contador de recursão
     private void CheckForChemicalBonds(int col, int row)
     {
+        Debug.Log($"CheckForChemicalBonds called for piece at [{col}, {row}].");
+        bondCheckRecursionCounter = 0; // Reseta o contador para cada chamada principal
+
         // Obtém todas as peças adjacentes e adjacentes das adjacentes
         List<ElementPiece> adjacentPieces = GetAdjacentPieces(col, row);
+        Debug.Log($"GetAdjacentPieces returned {adjacentPieces.Count} pieces for check at [{col}, {row}].");
         
         // Se não há peças suficientes para formar uma ligação, retorna
         if (adjacentPieces.Count < 2)
@@ -687,14 +722,17 @@ public class GridManager : MonoBehaviour
             {
                 // Encontra todas as combinações possíveis de peças que satisfazem a ligação
                 List<List<ElementPiece>> possibleCombinations = new List<List<ElementPiece>>();
-                FindPossibleCombinations(adjacentPieces, bond.Value, new List<ElementPiece>(), possibleCombinations);
+                FindPossibleCombinations(adjacentPieces, bond.Value, new List<ElementPiece>(), possibleCombinations, ref bondCheckRecursionCounter);
 
+                int combinationsCheckedByAreConnected = 0;
                 // Verifica cada combinação possível
                 foreach (var combination in possibleCombinations)
                 {
+                    combinationsCheckedByAreConnected++;
                     // Verifica se as peças estão conectadas
                     if (ArePiecesConnected(combination))
                     {
+                        Debug.Log($"Successful bond: Checked {combinationsCheckedByAreConnected} combinations with ArePiecesConnected.");
                         string bondType = "";
                         switch (bond.Key)
                         {
@@ -747,12 +785,14 @@ public class GridManager : MonoBehaviour
 
         // Se chegou aqui, não formou nenhuma ligação válida
         Debug.Log("No valid bond pattern found for these pieces");
+        Debug.Log($"CheckForChemicalBonds at [{col}, {row}] finished. Total FindPossibleCombinations calls: {bondCheckRecursionCounter}");
     }
 
     // Encontra todas as combinações possíveis de peças que satisfazem uma ligação
     private void FindPossibleCombinations(List<ElementPiece> pieces, Dictionary<int, int> requiredElements, 
-        List<ElementPiece> currentCombination, List<List<ElementPiece>> result)
+        List<ElementPiece> currentCombination, List<List<ElementPiece>> result, ref long recursionCounter)
     {
+        recursionCounter++;
         // Se já temos todas as peças necessárias
         if (IsValidCombination(currentCombination, requiredElements))
         {
@@ -766,7 +806,7 @@ public class GridManager : MonoBehaviour
             if (!currentCombination.Contains(piece))
             {
                 currentCombination.Add(piece);
-                FindPossibleCombinations(pieces, requiredElements, currentCombination, result);
+                FindPossibleCombinations(pieces, requiredElements, currentCombination, result, ref recursionCounter);
                 currentCombination.RemoveAt(currentCombination.Count - 1);
             }
         }

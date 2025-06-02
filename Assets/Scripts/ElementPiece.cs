@@ -53,49 +53,6 @@ public class ElementPiece : MonoBehaviour
         }
     }
 
-    // Método para verificar se esta peça pode formar uma ligação química com outras peças
-    public bool CanFormBondWith(List<ElementPiece> otherPieces)
-    {
-        // Conta quantos elementos de cada tipo estão na lista
-        Dictionary<int, int> elementCounts = new Dictionary<int, int>();
-        foreach (var piece in otherPieces)
-        {
-            if (!elementCounts.ContainsKey(piece.elementType))
-                elementCounts[piece.elementType] = 0;
-            elementCounts[piece.elementType]++;
-        }
-
-        // Adiciona o próprio elemento à contagem
-        if (!elementCounts.ContainsKey(elementType))
-            elementCounts[elementType] = 0;
-        elementCounts[elementType]++;
-
-        Debug.Log($"Checking bond possibility with elements: {string.Join(", ", elementCounts.Select(kvp => $"{kvp.Key}:{kvp.Value}"))}");
-
-        // Verifica se podemos formar alguma ligação química com esta combinação
-        foreach (var bond in GridManager.Instance.chemicalBonds)
-        {
-            bool canFormBond = true;
-            foreach (var element in bond.Value)
-            {
-                if (!elementCounts.ContainsKey(element.Key) || elementCounts[element.Key] != element.Value)
-                {
-                    canFormBond = false;
-                    break;
-                }
-            }
-
-            if (canFormBond)
-            {
-                Debug.Log($"Found valid bond pattern: {bond.Key}");
-                return true;
-            }
-        }
-
-        Debug.Log("No valid bond pattern found");
-        return false;
-    }
-
     // Método para iniciar a animação de remoção quando formar uma ligação
     public void StartBondAnimation()
     {
