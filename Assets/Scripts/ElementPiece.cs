@@ -12,6 +12,11 @@ public class ElementPiece : MonoBehaviour
     // Variável pública para armazenar o tipo de elemento (usando um índice simples por agora)
     public int elementType;
 
+    // Coordenadas da peça na grade (para acesso mais rápido).
+    // Estes valores são gerenciados pelo GridManager quando a peça é colocada ou movida na grade.
+    public int GridX { get; set; }
+    public int GridY { get; set; }
+
     // Referências para os componentes TextMeshPro filhos para exibir as informações do elemento
     [SerializeField] private TextMeshPro atomicNumberText; // Para o número atómico
     [SerializeField] private TextMeshPro symbolText;       // Para o símbolo do elemento
@@ -89,4 +94,14 @@ public class ElementPiece : MonoBehaviour
     // private string GetSymbol(int typeIndex) { /* Implementar */ return "N/A"; }
     // private string GetName(int typeIndex) { /* Implementar */ return "Unknown"; }
     // private Color GetElementColor(int typeIndex) { /* Implementar */ return Color.gray; }
+
+    /// <summary>
+    /// Retorna o símbolo textual do elemento (ex: "H", "O").
+    /// Usado principalmente para logging e debug.
+    /// </summary>
+    /// <returns>O símbolo do elemento como string, ou "N/A" se o componente de texto não estiver disponível.</returns>
+    public string GetSymbol()
+    {
+        return symbolText != null ? symbolText.text : "N/A";
+    }
 }
