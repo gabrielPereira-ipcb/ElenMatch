@@ -47,13 +47,6 @@ public class GridManager : MonoBehaviour
 
     // Variáveis de pontuação
     private int currentScore = 0;
-    private Dictionary<string, int> bondScores = new Dictionary<string, int>()
-    {
-        { "H2O", 100 },   // Água
-        { "NaCl", 150 },  // Sal
-        { "CO2", 200 },   // Dióxido de carbono
-        { "NH3", 175 }    // Amónia
-    };
 
     // Bónus baseado no número de peças
     private Dictionary<int, float> pieceCountMultiplier = new Dictionary<int, float>()
@@ -64,19 +57,24 @@ public class GridManager : MonoBehaviour
         { 5, 2.0f }      // 5 ou mais peças = dobro da pontuação
     };
 
-    // Dicionário para mapear combinações químicas
-    // Dicionário para mapear combinações químicas (elementType: quantidade)
-    public Dictionary<int, Dictionary<int, int>> chemicalBonds = new Dictionary<int, Dictionary<int, int>>()
+    // Nova estrutura para receitas de ligações químicas
+    public List<ChemicalBondRecipe> chemicalBondRecipes = new List<ChemicalBondRecipe>();
+
+    private void InitializeChemicalBondRecipes()
     {
-        // H2O (2 H e 1 O)
-        { 0, new Dictionary<int, int> { { 0, 2 }, { 1, 1 } } },
-        // NaCl (1 Na e 1 Cl)
-        { 2, new Dictionary<int, int> { { 2, 1 }, { 3, 1 } } },
-        // CO2 (1 C e 2 O)
-        { 3, new Dictionary<int, int> { { 3, 1 }, { 1, 2 } } },
-        // NH3 (1 N e 3 H)
-        { 4, new Dictionary<int, int> { { 4, 1 }, { 0, 3 } } }
-    };
+        // ElementType key:
+        // 0: Hidrogénio (H)
+        // 1: Oxigénio (O)
+        // 2: Sódio (Na)
+        // 3: Cloro (Cl)
+        // 4: Nitrogénio (N)
+        // 5: Carbono (C)
+
+        chemicalBondRecipes.Add(new ChemicalBondRecipe("H2O", new Dictionary<int, int> { { 0, 2 }, { 1, 1 } }, 100));  // Água
+        chemicalBondRecipes.Add(new ChemicalBondRecipe("NaCl", new Dictionary<int, int> { { 2, 1 }, { 3, 1 } }, 150)); // Sal
+        chemicalBondRecipes.Add(new ChemicalBondRecipe("CO2", new Dictionary<int, int> { { 5, 1 }, { 1, 2 } }, 200));  // Dióxido de Carbono (Corrigido para Carbono=5)
+        chemicalBondRecipes.Add(new ChemicalBondRecipe("NH3", new Dictionary<int, int> { { 4, 1 }, { 0, 3 } }, 175)); // Amónia
+    }
 
     private void Awake()
     {
@@ -93,6 +91,8 @@ public class GridManager : MonoBehaviour
         // Inicializamos o array da grelha com as dimensões corretas
         grid = new GameObject[width, height];
         Debug.Log($"Grid initialized with dimensions: {width}x{height}");
+
+        InitializeChemicalBondRecipes(); // Popula as receitas de ligações
 
         // Reinicia a pontuação
         currentScore = 0;
@@ -214,16 +214,28 @@ public class GridManager : MonoBehaviour
             grid[currentColumnIndex, targetRow] = currentFallingPiece;
             Debug.Log($"Stored piece in grid at [{currentColumnIndex}, {targetRow}]");
 
+            // Definir coordenadas na ElementPiece
+            ElementPiece placedPieceScript = currentFallingPiece.GetComponent<ElementPiece>();
+            if (placedPieceScript != null)
+            {
+                placedPieceScript.GridX = currentColumnIndex;
+                placedPieceScript.GridY = targetRow;
+            }
+            else
+            {
+                Debug.LogError("Placed piece does not have an ElementPiece script!");
+            }
+
             // Verifica o estado atual do grid
             DebugGridState();
 
-            // Chama a função de verificação de combinações
-            CheckForChemicalBonds(currentColumnIndex, targetRow);
-
-            // Libera o controlo da peça atual
+            // Libera o controlo da peça atual ANTES de processar as ligações em cascata
             currentFallingPiece = null;
 
-            // Verifica se a grelha está cheia após a queda da peça
+            // Processa todas as ligações em cascata
+            ProcessCascadingBonds();
+
+            // Verifica se a grelha está cheia após a queda da peça e processamento das ligações
             if (IsGridFull())
             {
                 Debug.Log("Game Over - Grid is full!");
@@ -459,74 +471,13 @@ public class GridManager : MonoBehaviour
         return true;
     }
 
-    // Obtém peças adjacentes numa posição específica
-    private List<ElementPiece> GetAdjacentPieces(int col, int row)
-    {
-        List<ElementPiece> pieces = new List<ElementPiece>();
-        HashSet<Vector2Int> checkedPositions = new HashSet<Vector2Int>();
-        Queue<Vector2Int> positionsToCheck = new Queue<Vector2Int>();
-        
-        // Verifica se a posição inicial tem uma peça
-        if (grid[col, row] == null)
-            return pieces;
-            
-        // Adiciona a posição inicial à fila
-        positionsToCheck.Enqueue(new Vector2Int(col, row));
-        checkedPositions.Add(new Vector2Int(col, row));
-        
-        // Define as direções a verificar (horizontal e vertical)
-        Vector2Int[] directions = new Vector2Int[]
-        {
-            new Vector2Int(-1, 0),  // Esquerda
-            new Vector2Int(1, 0),   // Direita
-            new Vector2Int(0, -1),  // Baixo
-            new Vector2Int(0, 1)    // Cima
-        };
-
-        // Processa todas as posições na fila
-        while (positionsToCheck.Count > 0)
-        {
-            Vector2Int currentPos = positionsToCheck.Dequeue();
-            
-            // Adiciona a peça atual à lista
-            ElementPiece piece = grid[currentPos.x, currentPos.y].GetComponent<ElementPiece>();
-            if (piece != null)
-            {
-                pieces.Add(piece);
-            }
-
-            // Verifica todas as direções adjacentes
-            foreach (Vector2Int dir in directions)
-            {
-                Vector2Int newPos = currentPos + dir;
-                
-                // Verifica se a posição está dentro dos limites da grelha
-                if (newPos.x >= 0 && newPos.x < width && newPos.y >= 0 && newPos.y < height)
-                {
-                    // Se a posição ainda não foi verificada e tem uma peça
-                    if (!checkedPositions.Contains(newPos) && grid[newPos.x, newPos.y] != null)
-                    {
-                        checkedPositions.Add(newPos);
-                        positionsToCheck.Enqueue(newPos);
-                    }
-                }
-            }
-        }
-
-        return pieces;
-    }
-
-    // Método para fazer as peças caírem após a remoção
+    // Método para fazer as peças caírem após a remoção (simplificado)
     private void MakePiecesFall()
     {
         Debug.Log("MakePiecesFall() called.");
-        bool piecesFell = false;
-        HashSet<Vector2Int> locationsToCheck = new HashSet<Vector2Int>();
-        
         // Para cada coluna
         for (int col = 0; col < width; col++)
         {
-            Debug.Log($"Checking column {col} for falling pieces.");
             // Encontra a primeira posição vazia de BAIXO para CIMA
             int firstEmptyRow = -1;
             for (int row = height - 1; row >= 0; row--)
@@ -541,303 +492,300 @@ public class GridManager : MonoBehaviour
             // Se encontrou um espaço vazio
             if (firstEmptyRow != -1)
             {
-                Debug.Log($"Found empty row at {firstEmptyRow} in column {col}.");
                 // Procura a primeira peça acima do espaço vazio
-                for (int row = firstEmptyRow - 1; row >= 0; row--)
+                for (int rowToMoveFrom = firstEmptyRow - 1; rowToMoveFrom >= 0; rowToMoveFrom--)
                 {
-                    if (grid[col, row] != null)
+                    if (grid[col, rowToMoveFrom] != null)
                     {
-                        Debug.Log($"Found piece at [{col}, {row}] to move to [{col}, {firstEmptyRow}].");
-                        ElementPiece pieceScript = grid[col, row].GetComponent<ElementPiece>();
-                        if (pieceScript != null)
-                        {
-                            Debug.Log($"Moving piece of type: {pieceScript.elementType}");
-                        }
-                        
-                        GameObject pieceToMove = grid[col, row];
+                        GameObject pieceToMove = grid[col, rowToMoveFrom];
                         grid[col, firstEmptyRow] = pieceToMove;
-                        grid[col, row] = null;
+                        grid[col, rowToMoveFrom] = null;
                         
                         Vector3 newPosition = CalculateGridPosition(col, firstEmptyRow);
                         pieceToMove.transform.position = newPosition;
-                        Debug.Log($"Piece moved to grid[{col}, {firstEmptyRow}] and position updated.");
-                        
-                        piecesFell = true;
-                        locationsToCheck.Add(new Vector2Int(col, firstEmptyRow)); // Adiciona a nova posição da peça
 
-                        // Adiciona posições adjacentes ortogonalmente à nova posição da peça
-                        AddAdjacentLocations(locationsToCheck, col, firstEmptyRow);
+                        // Atualizar coordenadas na ElementPiece
+                        ElementPiece movedPieceScript = pieceToMove.GetComponent<ElementPiece>();
+                        if (movedPieceScript != null)
+                        {
+                            movedPieceScript.GridX = col;
+                            movedPieceScript.GridY = firstEmptyRow;
+                        }
+                        else
+                        {
+                             Debug.LogError("Moved piece does not have an ElementPiece script!");
+                        }
+                        Debug.Log($"Piece moved from [{col},{rowToMoveFrom}] to [{col},{firstEmptyRow}] and its coordinates updated.");
 
-                        firstEmptyRow--;
+                        firstEmptyRow--; // A próxima peça cairá na linha vazia acima da atual
                     }
                 }
             }
         }
-        
-        if (piecesFell)
-        {
-            Debug.Log($"Pieces fell, re-triggering bond checks for {locationsToCheck.Count} specific locations.");
-            foreach (var loc in locationsToCheck)
-            {
-                if (grid[loc.x, loc.y] != null) // Verifica se ainda existe uma peça no local (pode ter sido removida por outra ligação)
-                {
-                    CheckForChemicalBonds(loc.x, loc.y);
-                }
-            }
-        }
     }
 
-    private void AddAdjacentLocations(HashSet<Vector2Int> locations, int col, int row)
-    {
-        int[] dCol = { -1, 1, 0, 0 };
-        int[] dRow = { 0, 0, -1, 1 };
-
-        for (int i = 0; i < 4; i++)
-        {
-            int adjacentCol = col + dCol[i];
-            int adjacentRow = row + dRow[i];
-
-            if (adjacentCol >= 0 && adjacentCol < width && adjacentRow >= 0 && adjacentRow < height)
-            {
-                if (grid[adjacentCol, adjacentRow] != null) // Só adiciona se houver uma peça lá
-                {
-                    locations.Add(new Vector2Int(adjacentCol, adjacentRow));
-                }
-            }
-        }
-    }
-
-    // Verifica se duas peças estão adjacentes (horizontal ou vertical)
-    private bool ArePiecesAdjacent(Vector3 pos1, Vector3 pos2)
-    {
-        float xDiff = Mathf.Abs(pos1.x - pos2.x);
-        float yDiff = Mathf.Abs(pos1.y - pos2.y);
-        
-        // Peças estão adjacentes se estiverem na mesma linha ou coluna
-        // e a distância for exatamente igual à largura da coluna ou altura da linha
-        bool isAdjacent = (xDiff < 0.1f && Mathf.Abs(yDiff - rowHeight) < 0.1f) || // Mesma coluna
-                         (yDiff < 0.1f && Mathf.Abs(xDiff - columnWidth) < 0.1f); // Mesma linha
-        
-        Debug.Log($"Checking adjacency between pieces at {pos1} and {pos2}: {isAdjacent}");
-        return isAdjacent;
-    }
-
-    // Verifica se um grupo de peças está conectado
-    private bool ArePiecesConnected(List<ElementPiece> pieces)
-    {
-        if (pieces.Count < 2) return true;
-
-        // Cria um grafo de conexões
-        Dictionary<ElementPiece, List<ElementPiece>> connections = new Dictionary<ElementPiece, List<ElementPiece>>();
-        
-        // Inicializa o grafo
-        foreach (var piece in pieces)
-        {
-            connections[piece] = new List<ElementPiece>();
-        }
-
-        // Adiciona as conexões
-        for (int i = 0; i < pieces.Count; i++)
-        {
-            for (int j = i + 1; j < pieces.Count; j++)
-            {
-                if (ArePiecesAdjacent(pieces[i].transform.position, pieces[j].transform.position))
-                {
-                    connections[pieces[i]].Add(pieces[j]);
-                    connections[pieces[j]].Add(pieces[i]);
-                }
-            }
-        }
-
-        // Verifica se todas as peças estão conectadas usando BFS
-        HashSet<ElementPiece> visited = new HashSet<ElementPiece>();
-        Queue<ElementPiece> queue = new Queue<ElementPiece>();
-        
-        queue.Enqueue(pieces[0]);
-        visited.Add(pieces[0]);
-
-        while (queue.Count > 0)
-        {
-            var current = queue.Dequeue();
-            foreach (var neighbor in connections[current])
-            {
-                if (!visited.Contains(neighbor))
-                {
-                    visited.Add(neighbor);
-                    queue.Enqueue(neighbor);
-                }
-            }
-        }
-
-        // Se todas as peças foram visitadas, elas estão conectadas
-        return visited.Count == pieces.Count;
-    }
-
-    // Verifica ligações químicas
-    private static long bondCheckRecursionCounter = 0; // Contador de recursão
-    private void CheckForChemicalBonds(int col, int row)
-    {
-        Debug.Log($"CheckForChemicalBonds called for piece at [{col}, {row}].");
-        bondCheckRecursionCounter = 0; // Reseta o contador para cada chamada principal
-
-        // Obtém todas as peças adjacentes e adjacentes das adjacentes
-        List<ElementPiece> adjacentPieces = GetAdjacentPieces(col, row);
-        Debug.Log($"GetAdjacentPieces returned {adjacentPieces.Count} pieces for check at [{col}, {row}].");
-        
-        // Se não há peças suficientes para formar uma ligação, retorna
-        if (adjacentPieces.Count < 2)
-            return;
-        
-        // Conta os elementos presentes
-        Dictionary<int, int> elementCounts = new Dictionary<int, int>();
-        foreach (var piece in adjacentPieces)
-        {
-            if (!elementCounts.ContainsKey(piece.elementType))
-                elementCounts[piece.elementType] = 0;
-            elementCounts[piece.elementType]++;
-        }
-
-        // Log das peças envolvidas
-        Debug.Log("Checking for bonds between pieces:");
-        foreach (var kvp in elementCounts)
-        {
-            Debug.Log($"- Element type {kvp.Key}: {kvp.Value} pieces");
-        }
-
-        // Verifica cada tipo de ligação conhecida
-        foreach (var bond in chemicalBonds)
-        {
-            bool canFormBond = true;
-            int totalRequiredPieces = 0;
-
-            // Primeiro, verifica se temos todos os elementos necessários
-            foreach (var element in bond.Value)
-            {
-                if (!elementCounts.ContainsKey(element.Key) || 
-                    elementCounts[element.Key] < element.Value)
-                {
-                    canFormBond = false;
-                    break;
-                }
-                totalRequiredPieces += element.Value;
-            }
-
-            // Se temos todos os elementos necessários
-            if (canFormBond)
-            {
-                // Encontra todas as combinações possíveis de peças que satisfazem a ligação
-                List<List<ElementPiece>> possibleCombinations = new List<List<ElementPiece>>();
-                FindPossibleCombinations(adjacentPieces, bond.Value, new List<ElementPiece>(), possibleCombinations, ref bondCheckRecursionCounter);
-
-                int combinationsCheckedByAreConnected = 0;
-                // Verifica cada combinação possível
-                foreach (var combination in possibleCombinations)
-                {
-                    combinationsCheckedByAreConnected++;
-                    // Verifica se as peças estão conectadas
-                    if (ArePiecesConnected(combination))
-                    {
-                        Debug.Log($"Successful bond: Checked {combinationsCheckedByAreConnected} combinations with ArePiecesConnected.");
-                        string bondType = "";
-                        switch (bond.Key)
-                        {
-                            case 0: bondType = "H2O"; break;
-                            case 2: bondType = "NaCl"; break;
-                            case 3: bondType = "CO2"; break;
-                            case 4: bondType = "NH3"; break;
-                            case 5: bondType = "CH4"; break;
-                        }
-
-                        Debug.Log($"Chemical bond formed! Type: {bondType}");
-                        Debug.Log($"Elements involved: {string.Join(", ", elementCounts.Select(kvp => $"{kvp.Key}:{kvp.Value}"))}");
-                        
-                        // Adiciona pontos
-                        if (bondScores.ContainsKey(bondType))
-                        {
-                            AddScore(bondScores[bondType], totalRequiredPieces);
-                        }
-                        
-                        // Remove apenas as peças que formaram a ligação
-                        foreach (ElementPiece piece in combination)
-                        {
-                            // Encontra a posição da peça na grelha
-                            Vector3 piecePos = piece.transform.position;
-                            int pieceCol = Mathf.RoundToInt((piecePos.x - startGridX) / columnWidth);
-                            int pieceRow = Mathf.RoundToInt((baseGridY - piecePos.y) / rowHeight);
-
-                            // Limpa a referência na grelha
-                            if (pieceCol >= 0 && pieceCol < width && pieceRow >= 0 && pieceRow < height)
-                            {
-                                grid[pieceCol, pieceRow] = null;
-                            }
-
-                            // Inicia a animação de remoção
-                            piece.StartBondAnimation();
-
-                            // Destroi o GameObject
-                            Destroy(piece.gameObject);
-                        }
-
-                        // Faz as peças caírem após a remoção
-                        MakePiecesFall();
-
-                        // Retorna após formar uma ligação válida
-                        return;
-                    }
-                }
-            }
-        }
-
-        // Se chegou aqui, não formou nenhuma ligação válida
-        Debug.Log("No valid bond pattern found for these pieces");
-        Debug.Log($"CheckForChemicalBonds at [{col}, {row}] finished. Total FindPossibleCombinations calls: {bondCheckRecursionCounter}");
-    }
-
-    // Encontra todas as combinações possíveis de peças que satisfazem uma ligação
-    private void FindPossibleCombinations(List<ElementPiece> pieces, Dictionary<int, int> requiredElements, 
-        List<ElementPiece> currentCombination, List<List<ElementPiece>> result, ref long recursionCounter)
+    // Novo método de busca recursiva para formar ligações
+    private List<ElementPiece> TryFormBondRecursive(ElementPiece currentPiece, Vector2Int currentCoords,
+                                                    Dictionary<int, int> requiredElements,
+                                                    List<ElementPiece> currentPath,
+                                                    HashSet<Vector2Int> visitedInPath,
+                                                    ref long recursionCounter)
     {
         recursionCounter++;
-        // Se já temos todas as peças necessárias
-        if (IsValidCombination(currentCombination, requiredElements))
+        currentPath.Add(currentPiece);
+        visitedInPath.Add(currentCoords);
+
+        // Contar elementos no caminho atual
+        Dictionary<int, int> currentPathElementsCount = new Dictionary<int, int>();
+        int totalPiecesInCurrentPath = currentPath.Count;
+        foreach (var pieceInPath in currentPath)
         {
-            result.Add(new List<ElementPiece>(currentCombination));
+            if (!currentPathElementsCount.ContainsKey(pieceInPath.elementType))
+                currentPathElementsCount[pieceInPath.elementType] = 0;
+            currentPathElementsCount[pieceInPath.elementType]++;
+        }
+
+        // Calcular o número total de peças necessárias para a ligação
+        int totalPiecesRequiredForBond = 0;
+        foreach (var req in requiredElements.Values)
+            totalPiecesRequiredForBond += req;
+
+        // Verificação de validade e conclusão
+        if (totalPiecesInCurrentPath > totalPiecesRequiredForBond)
+        {
+            // Caminho muito longo
+            currentPath.RemoveAt(currentPath.Count - 1);
+            visitedInPath.Remove(currentCoords);
+            return null;
+        }
+
+        foreach (var requiredType in requiredElements.Keys)
+        {
+            int currentCountOfType = currentPathElementsCount.ContainsKey(requiredType) ? currentPathElementsCount[requiredType] : 0;
+            if (currentCountOfType > requiredElements[requiredType])
+            {
+                // Excesso de um tipo de elemento
+                currentPath.RemoveAt(currentPath.Count - 1);
+                visitedInPath.Remove(currentCoords);
+                return null;
+            }
+        }
+
+        if (totalPiecesInCurrentPath == totalPiecesRequiredForBond)
+        {
+            bool bondFormed = true;
+            foreach (var requiredType in requiredElements.Keys)
+            {
+                int currentCountOfType = currentPathElementsCount.ContainsKey(requiredType) ? currentPathElementsCount[requiredType] : 0;
+                if (currentCountOfType != requiredElements[requiredType])
+                {
+                    bondFormed = false;
+                    break;
+                }
+            }
+            if (bondFormed)
+            {
+                return new List<ElementPiece>(currentPath); // Ligação formada!
+            }
+            // Se o número de peças é o correto, mas a combinação de tipos não é, este caminho é inválido.
+            // No entanto, a lógica de excesso de tipo acima já deve tratar isso.
+            // Se chegou aqui, significa que o número de peças é certo, mas algum tipo falta (ou seja, currentCountOfType < requiredElements[requiredType])
+            // o que é permitido para continuar a busca, mas não para finalizar.
+            // Se especificamente TODOS os requiredElements.Keys foram verificados e algum não bateu,
+            // E o totalPiecesInCurrentPath == totalPiecesRequiredForBond, então é um beco sem saída para este caminho.
+            bool exactMatch = true;
+            foreach(var kvp in requiredElements)
+            {
+                if (!currentPathElementsCount.ContainsKey(kvp.Key) || currentPathElementsCount[kvp.Key] != kvp.Value)
+                {
+                    exactMatch = false;
+                    break;
+                }
+            }
+            if (!exactMatch && currentPathElementsCount.Count == requiredElements.Count) // Garante que todos os tipos requeridos foram pelo menos considerados
+            {
+                 // Backtrack se o número de peças é o correto mas a combinação de tipos não é perfeita
+                currentPath.RemoveAt(currentPath.Count - 1);
+                visitedInPath.Remove(currentCoords);
+                return null;
+            }
+
+        }
+
+
+        // Exploração de Vizinhos
+        Vector2Int[] directions = { Vector2Int.up, Vector2Int.down, Vector2Int.left, Vector2Int.right };
+        foreach (var dir in directions)
+        {
+            Vector2Int neighborCoords = currentCoords + dir;
+            if (neighborCoords.x >= 0 && neighborCoords.x < width &&
+                neighborCoords.y >= 0 && neighborCoords.y < height &&
+                grid[neighborCoords.x, neighborCoords.y] != null &&
+                !visitedInPath.Contains(neighborCoords))
+            {
+                ElementPiece neighborPiece = grid[neighborCoords.x, neighborCoords.y].GetComponent<ElementPiece>();
+                if (neighborPiece != null)
+                {
+                    List<ElementPiece> result = TryFormBondRecursive(neighborPiece, neighborCoords, requiredElements, currentPath, visitedInPath, ref recursionCounter);
+                    if (result != null)
+                    {
+                        return result; // Propaga a solução encontrada
+                    }
+                }
+            }
+        }
+
+        // Backtrack se nenhum vizinho levou a uma solução
+        currentPath.RemoveAt(currentPath.Count - 1);
+        visitedInPath.Remove(currentCoords);
+        return null;
+    }
+
+
+    // Tenta processar uma ligação química no local especificado e seus arredores.
+    // Retorna true se uma ligação foi formada e processada, false caso contrário.
+    private static long bondCheckRecursionCounter = 0; // Contador de recursão
+    private bool TryProcessBondAt(int col, int row)
+    {
+        Debug.Log($"TryProcessBondAt called for piece at [{col}, {row}]. Recursion count reset.");
+        bondCheckRecursionCounter = 0; // Resetar para cada tentativa de ligação em um ponto.
+
+        // Lista de pontos de partida: a peça na posição (col, row) e suas vizinhas diretas.
+        List<ElementPiece> startingPoints = new List<ElementPiece>();
+        HashSet<GameObject> addedStartingObjects = new HashSet<GameObject>(); // Para evitar duplicatas na lista startingPoints
+
+        // Adiciona a peça que acabou de cair (se existir)
+        if (grid[col, row] != null)
+        {
+            ElementPiece placedPiece = grid[col, row].GetComponent<ElementPiece>();
+            if (placedPiece != null)
+            {
+                startingPoints.Add(placedPiece);
+                addedStartingObjects.Add(placedPiece.gameObject);
+            }
+        }
+
+        // Adiciona vizinhos da peça que caiu como pontos de partida alternativos
+        int[] dCol = { -1, 1, 0, 0 }; // Esquerda, Direita
+        int[] dRow = { 0, 0, -1, 1 }; // Baixo, Cima (lembre-se que a grade é y-para-baixo no array)
+
+        for (int i = 0; i < 4; ++i)
+        {
+            int newC = col + dCol[i];
+            int newR = row + dRow[i];
+
+            if (newC >= 0 && newC < width && newR >= 0 && newR < height && grid[newC, newR] != null)
+            {
+                ElementPiece neighborPiece = grid[newC, newR].GetComponent<ElementPiece>();
+                if (neighborPiece != null && !addedStartingObjects.Contains(neighborPiece.gameObject))
+                {
+                    startingPoints.Add(neighborPiece);
+                    addedStartingObjects.Add(neighborPiece.gameObject);
+                }
+            }
+        }
+
+        if (startingPoints.Count == 0)
+        {
+            Debug.Log("No starting pieces found for bond check (should not happen if a piece was just placed).");
             return;
         }
 
-        // Se ainda precisamos de mais peças
-        foreach (var piece in pieces)
+        // Iterar sobre cada definição de ligação em `chemicalBondRecipes`
+        foreach (ChemicalBondRecipe recipe in chemicalBondRecipes)
         {
-            if (!currentCombination.Contains(piece))
+            // Tentar formar a ligação começando com cada ponto de partida potencial
+            foreach (ElementPiece startPiece in startingPoints)
             {
-                currentCombination.Add(piece);
-                FindPossibleCombinations(pieces, requiredElements, currentCombination, result, ref recursionCounter);
-                currentCombination.RemoveAt(currentCombination.Count - 1);
+                if (startPiece == null) continue; // Segurança extra
+
+                // Usar coordenadas cacheadas da ElementPiece
+                Vector2Int startCoords = new Vector2Int(startPiece.GridX, startPiece.GridY);
+
+                // Só tenta iniciar uma ligação com esta peça se o seu tipo for um dos requeridos pela ligação atual
+                // E se a ligação requer pelo menos uma peça desse tipo.
+                // Isso evita iniciar buscas desnecessárias.
+                if (!recipe.RequiredElements.ContainsKey(startPiece.elementType) || recipe.RequiredElements[startPiece.elementType] == 0)
+                {
+                    //Debug.Log($"Skipping start piece {startPiece.name} (type {startPiece.elementType}) for bond {recipe.BondName} as its type is not required or count is zero.");
+                    continue;
+                }
+
+                List<ElementPiece> foundBondPieces = TryFormBondRecursive(
+                    startPiece,
+                    startCoords,
+                    recipe.RequiredElements, // Usar os elementos da receita atual
+                    new List<ElementPiece>(),    // Caminho inicial vazio
+                    new HashSet<Vector2Int>(),   // Visitados no caminho inicial vazio
+                    ref bondCheckRecursionCounter
+                );
+
+                if (foundBondPieces != null && foundBondPieces.Count > 0)
+                {
+                    Debug.Log($"Chemical bond '{recipe.BondName}' formed with {foundBondPieces.Count} pieces! Starting piece: {startPiece.name} at [{startCoords.x},{startCoords.y}]");
+
+                    AddScore(recipe.Score, recipe.GetTotalPiecesInRecipe());
+
+                    foreach (ElementPiece pieceInBond in foundBondPieces)
+                    {
+                        // Usar coordenadas cacheadas da ElementPiece para remoção
+                        grid[pieceInBond.GridX, pieceInBond.GridY] = null;
+                        Debug.Log($"Removed piece {pieceInBond.name} from grid at [{pieceInBond.GridX},{pieceInBond.GridY}]");
+
+                        // Inicia a animação de remoção (se houver)
+                        // pieceInBond.StartBondAnimation(); // Descomente se tiver essa animação
+                        Destroy(pieceInBond.gameObject);
+                        Debug.Log($"Destroyed GameObject for piece {pieceInBond.name}");
+                    }
+
+                    MakePiecesFall(); // Peças caem APÓS uma ligação ser processada.
+                    Debug.Log($"TryProcessBondAt completed. Bond '{recipe.BondName}' formed. Total TryFormBondRecursive calls: {bondCheckRecursionCounter}");
+                    return true; // Ligação formada e processada
+                }
             }
         }
+        Debug.Log($"No chemical bond formed from piece at [{col},{row}]. Total TryFormBondRecursive calls: {bondCheckRecursionCounter}");
+        return false; // Nenhuma ligação formada
     }
 
-    // Verifica se uma combinação de peças satisfaz os requisitos de uma ligação
-    private bool IsValidCombination(List<ElementPiece> combination, Dictionary<int, int> requiredElements)
+    private void ProcessCascadingBonds()
     {
-        Dictionary<int, int> elementCounts = new Dictionary<int, int>();
-        foreach (var piece in combination)
-        {
-            if (!elementCounts.ContainsKey(piece.elementType))
-                elementCounts[piece.elementType] = 0;
-            elementCounts[piece.elementType]++;
-        }
+        bool bondFormedInLastScan;
+        int safetyBreak = 0;
+        const int maxIterations = 100; // Limite de iterações para evitar loops infinitos
 
-        foreach (var element in requiredElements)
+        do
         {
-            if (!elementCounts.ContainsKey(element.Key) || 
-                elementCounts[element.Key] != element.Value)
+            bondFormedInLastScan = false;
+            if (safetyBreak++ > maxIterations)
             {
-                return false;
+                Debug.LogError("Safety break triggered in ProcessCascadingBonds. Check for infinite loop logic.");
+                break;
             }
-        }
 
-        return true;
+            // A grade deve estar "assentada" antes de cada varredura.
+            // MakePiecesFall() é chamado dentro de TryProcessBondAt se uma ligação é feita,
+            // o que já assenta a grade para a próxima iteração do ProcessCascadingBonds.
+
+            for (int r = height - 1; r >= 0; r--) // De baixo para cima
+            {
+                for (int c = 0; c < width; c++)
+                {
+                    if (grid[c, r] != null)
+                    {
+                        if (TryProcessBondAt(c, r)) // TryProcessBondAt chama MakePiecesFall internamente se necessário
+                        {
+                            bondFormedInLastScan = true;
+                            // Uma ligação foi formada e peças podem ter caído.
+                            // Reiniciar a varredura para considerar o novo estado da grade.
+                            goto nextGridScanIteration;
+                        }
+                    }
+                }
+            }
+            nextGridScanIteration:; // Rótulo para o goto
+        } while (bondFormedInLastScan);
+        Debug.Log($"ProcessCascadingBonds finished. Safety counter: {safetyBreak-1}");
     }
 
     // Método para adicionar pontos
@@ -888,46 +836,39 @@ public class GridManager : MonoBehaviour
         return true;
     }
 
-    // Determina o tipo de ligação química formada
-    private string DetermineBondType(List<ElementPiece> pieces)
+    // Determina o tipo de ligação química formada (usado anteriormente, pode ser obsoleto ou adaptado se necessário)
+    // private string DetermineBondType(List<ElementPiece> pieces) // Comentado pois DetermineBondName(int bondKey) é usado agora.
+    // {
+    //     // ... lógica anterior ...
+    // }
+}
+
+// Definição da classe ChemicalBondRecipe
+public class ChemicalBondRecipe
+{
+    public string BondName { get; private set; }
+    public Dictionary<int, int> RequiredElements { get; private set; }
+    public int Score { get; private set; }
+    private readonly int totalPieces; // Cache para o número total de peças
+
+    public ChemicalBondRecipe(string name, Dictionary<int, int> requiredElements, int score)
     {
-        // Conta os elementos presentes
-        Dictionary<int, int> elementCounts = new Dictionary<int, int>();
-        foreach (var piece in pieces)
-        {
-            if (!elementCounts.ContainsKey(piece.elementType))
-                elementCounts[piece.elementType] = 0;
-            elementCounts[piece.elementType]++;
-        }
+        BondName = name;
+        RequiredElements = requiredElements;
+        Score = score;
 
-        // Verifica cada tipo de ligação conhecida
-        foreach (var bond in chemicalBonds) 
+        // Calcula e armazena o total de peças no construtor
+        int calculatedTotal = 0;
+        foreach (var count in RequiredElements.Values)
         {
-            bool matches = true;
-            foreach (var element in bond.Value)
-            {
-                if (!elementCounts.ContainsKey(element.Key) || 
-                    elementCounts[element.Key] != element.Value)
-                {
-                    matches = false;
-                    break;
-                }
-            }
-            if (matches)
-            {
-                switch (bond.Key)
-                {
-                    case 0: return "H2O";
-                    case 2: return "NaCl";
-                    case 3: return "CO2";
-                    case 4: return "NH3";
-                    case 5: return "CH4";
-                    default: return "Unknown";
-                }
-            }
+            calculatedTotal += count;
         }
+        this.totalPieces = calculatedTotal;
+    }
 
-        return "Unknown";
+    public int GetTotalPiecesInRecipe()
+    {
+        return this.totalPieces; // Retorna o valor cacheado
     }
 }
 
