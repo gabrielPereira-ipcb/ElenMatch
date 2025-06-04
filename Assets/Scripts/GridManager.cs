@@ -313,6 +313,11 @@ public class GridManager : MonoBehaviour
             {
                 MovePieceHorizontally();
             }
+            if (Input.GetKeyDown(KeyCode.Backspace))
+            {
+                // Volta para o menu inicial (MenuScene)
+                UnityEngine.SceneManagement.SceneManager.LoadScene("MenuScene");
+            }
             if (Input.GetKeyDown(KeyCode.Return))
             {
                 DropPiece();
@@ -866,7 +871,7 @@ public class GridManager : MonoBehaviour
     {
         if (scoreText != null)
         {
-            scoreText.text = $"Score: {currentScore}";
+            scoreText.text = $"{currentScore}";
         }
     }
 
